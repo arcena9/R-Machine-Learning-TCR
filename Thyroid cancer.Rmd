@@ -1,0 +1,897 @@
+---
+---
+---
+
+# **Thyroid cancer recurrence prediction**
+
+Andre Nana
+
+![Thyroid gland](23188-thyroid-2.jpg){width="450"}
+
+# 1. Introduction
+
+This project investigates recurrence in thyroid cancer patients using both statistical logistic regression and machine learning methods. With the logistic regression, we explore the relationship between ever smoking and the likelihood of recurrence. We then shift to machine learning techniques for risk stratification and evaluate the predictive accuracy of the following algorithms:
+
+-   logistic regression,
+-   K-Nearest Neighbors (KNN),
+-   Decision Tree,
+-   Random Forest,
+-   Support Vector Machines (SVM),and,
+-   Artificial Neural Networks (ANN)
+
+These algorithms are evaluated based on the following performance metrics:
+
+-   Sensitivity (ability to correctly identify patients who experience recurrence),
+-   Specificity (ability to correctly identify those who do not),
+-   Positive Predictive Value (PPV) (the probability that predicted recurrences are true),
+-   Negative Predictive Value (NPV) (the probability that predicted non-recurrences are true),
+-   Area Under the ROC curve (AUC) (overall discriminatory ability),
+-   Accuracy (the proportion of correct classifications across all cases).
+
+The dataset in this study is publicly accessible and the University of California Machine Learning Repository, and was generously provided by Borzooei et al., who published their original findings in 2024.
+
+*Disclaimer: This analysis is intended for educational and research purposes only and has not been peer-reviewed. While efforts have been made to ensure the accuracy of the methods and results, the author does not guarantee the correctness or completeness of the analysis. The author bears no responsibility or liability for any errors, omissions, or outcomes resulting from the use of this material. Use at your own discretion.*
+
+# 2. Loading libraries and data
+
+```{r, message=FALSE, warning=FALSE}
+
+# Core data handling & wrangling
+library(tidyverse)
+library(readxl)
+
+# Data exploration & summary
+library(naniar)
+library(table1)
+library(gtsummary)
+
+# Modeling frameworks
+library(lme4)
+library(reticulate)
+
+# Model evaluation
+library(pROC)
+library(precrec)
+
+# Machine learning
+library(caret)
+library(caretEnsemble)
+library(nnet)
+library(randomForest)
+library(e1071)
+library(rpart)
+library(ModelMetrics)
+library(iml)
+
+# Loading Data
+tcr_original <- read.csv("Thyroid_Diff.csv")
+```
+
+# 3. Exploratory data analysis
+
+## 3.1. General information
+
+```{r}
+colnames(tcr_original)
+glimpse(tcr_original)
+```
+
+## 
+
+```{r}
+vis_miss(tcr_original, sort_miss = TRUE)
+```
+
+383 observation and 17 variables, no missing values
+
+## 3.2. Table 1
+
+```{r}
+table1(~. |Recurred,
+       data = tcr_original,
+       caption = "Description of case by recurrence status",
+       footnote = "Borzooei, S. & Tarokhian, A. (2023). Differentiated Thyroid Cancer Recurrence [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5632J.")
+```
+
+Those who recurred tend to be older and of higher stage of cancer among other attributes.
+
+# 4. Logistic regression (from a causal perspective)
+
+Our hypothesis is that ever smoking (whether in the past of currently), is associated with thyroid cancer recurrence. We will assume that only age and gender fit the criteria for confounders in our data set.
+
+## 4.1 Building new variables
+
+```{r}
+tcr_log = tcr_original |>
+  mutate( Recurred01 = case_when(
+              Recurred=="Yes"~1,
+              Recurred=="No"~0),
+          Age_cat = case_when(
+            Age < 55 ~ "0-55",
+            Age >= 55 ~ "55+"),
+          Smoke = case_when(
+            Smoking == "Yes" | Hx.Smoking == "Yes" ~ "Yes",
+            Smoking == "No" & Hx.Smoking == "No" ~ "No",
+            TRUE~NA_character_
+          )
+    
+  )
+```
+
+## 4.2 Stratifying by exposure
+
+```{r}
+table1(~ Recurred + Age_cat + Gender | Smoke,
+       data = tcr_log,
+       caption = "Description of patients by smoking status",
+       footnote = "Borzooei, S. & Tarokhian, A. (2023). Differentiated Thyroid Cancer Recurrence [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5632J.")
+```
+
+## 4.3 Model
+
+```{r}
+model.log <- glm(Recurred01 ~ Smoke + Age_cat + Gender, 
+                 data = tcr_log,
+                 family="binomial")
+summary(model.log)
+
+tbl_regression(model.log, exponentiate = TRUE)
+```
+
+We may conclude that ever smoking is indeed a "cause" for thyroid cancer recurrence, adjusting for age and gender, based on our causal theory (adjusted odds ratio = 2.04 [1.02, 4.02]). Note that we cannot interpret the coefficient for age and gender as it would lead to table two fallacy.
+
+# 5. Machine learning
+
+Now we develop different machine learning models using the original data set
+
+## 5.1 Pre-processing steps
+
+```{r}
+# data
+tcr_ml = tcr_original
+
+# common pre-processing steps
+
+tcr_ml$Recurred <- factor(tcr_ml$Recurred, levels = c("No", "Yes"))
+
+# Defining predictors
+predictors <- c("Age", "Gender", "Smoking", "Hx.Smoking", "Hx.Radiothreapy",
+                "Thyroid.Function", "Physical.Examination", "Adenopathy",
+                "Pathology", "Focality", "Risk", "T", "N", "M", "Stage",
+                "Response")
+
+outcome <- "Recurred"
+
+# Splitting data
+set.seed(123)
+trainIndex <- createDataPartition(tcr_ml[[outcome]], p = 0.8, list = FALSE)
+train_all <- tcr_ml[trainIndex, ]
+test_all  <- tcr_ml[-trainIndex, ]
+
+# 10-fold cross-validation
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+```
+
+## 5.2 Logistic regression
+
+### 5.2.1 Training model
+
+```{r, warning=FALSE}
+# Fit logistic regression with caret
+set.seed(123)
+fit_glm <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "glm",
+  family = binomial,
+  metric = "ROC",
+  trControl = ctrl
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_glm <- predict(fit_glm, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_glm <- predict(fit_glm, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_glm <- factor(pred_class_glm, levels = c("No","Yes"))
+```
+
+### 5.2.2 Confusion matrix
+
+```{r}
+cm_glm <- caret::confusionMatrix(
+  data      = pred_class_glm,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_glm)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table <- as.data.frame(cm_glm$table)
+
+# Rename columns for clarity
+colnames(cm_table) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - Logistic Regression",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.2.3 ROC Curve & AUC
+
+```{r}
+roc_obj <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_glm[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for Logistic Regression"
+)
+
+# Print AUC
+auc_val_glm <- pROC::auc(roc_obj)
+print(auc_val_glm)
+```
+
+### 5.2.4 Brier value
+
+```{r}
+brier_val_glm <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # converts "No"=0, "Yes"=1
+  pred_prob_glm[,"Yes"]
+)
+print(brier_val_glm)
+
+```
+
+### 5.2.5 Variable Importance
+
+```{r, warning=FALSE}
+vi_glm <- varImp(fit_glm, scale = TRUE)
+print(vi_glm)
+
+plot(vi_glm, top = 20)   
+
+```
+
+### 5.2.6 Conclusion
+
+The logistic regression model demonstrates excellent performance, with an accuracy of 0.96 (95% CI: 0.89–0.99) and a high kappa value (0.90), indicating strong agreement beyond chance. It achieves balanced sensitivity (0.95) and specificity (0.96), along with a strong AUC of 0.97, reflecting excellent discrimination. The low Brier score (0.035) indicates good calibration, meaning predicted probabilities closely match observed outcomes.
+
+## 5.3 K-Nearest Neighbors
+
+### 5.3.1 Training model
+
+```{r}
+# Fit KNN with caret
+set.seed(123)
+fit_knn <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "knn",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneLength = 10   # automatically tunes 'k'
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_knn <- predict(fit_knn, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_knn <- predict(fit_knn, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_knn    <- factor(pred_class_knn,    levels = c("No","Yes"))
+
+```
+
+### 5.3.2 Confusion matrix
+
+```{r}
+cm_knn <- caret::confusionMatrix(
+  data      = pred_class_knn,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_knn)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table <- as.data.frame(cm_knn$table)
+
+# Rename columns for clarity
+colnames(cm_table) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - KNN",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.3.3 ROC Curve & AUC
+
+```{r}
+roc_obj_knn <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_knn[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj_knn,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for KNN"
+)
+
+# Print AUC
+auc_val_knn <- pROC::auc(roc_obj_knn)
+print(auc_val_knn)
+
+```
+
+### 5.3.4 Brier value
+
+```{r}
+brier_val_knn <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # convert "No"=0, "Yes"=1
+  pred_prob_knn[,"Yes"]
+)
+print(brier_val_knn)
+
+```
+
+### 5.3.5 Variable Importance
+
+Unlike parametric models such as logistic regression, KNN does not provide interpretable variable importance. Attempts to compute importance using caret’s varImp() may fail when predictors are non-numeric. Alternative methods such as permutation importance can be used.
+
+```{r}
+# library(iml) requires
+
+permutation_importance <- function(model, train_data, predictors, outcome,
+                                   loss = "ce", n_repetitions = 5) {
+  # model        : a trained caret model (fit_knn, fit_glm, etc.)
+  # train_data   : the training dataset
+  # predictors   : vector of predictor column names
+  # outcome      : outcome column name
+  # loss         : loss function ("ce"=cross-entropy, "auc", "accuracy", etc.)
+  # n_repetitions: how many times to shuffle each variable
+
+  # Create predictor wrapper
+  predictor_obj <- Predictor$new(
+    model = model,
+    data  = train_data[, predictors],
+    y     = train_data[[outcome]]
+  )
+
+  # Compute feature importance
+  imp <- FeatureImp$new(
+    predictor_obj,
+    loss = loss,
+    n.repetitions = n_repetitions
+  )
+
+  return(imp)
+}
+
+
+imp_knn <- permutation_importance(
+  model        = fit_knn,
+  train_data   = train_all,
+  predictors   = predictors,
+  outcome      = outcome,
+  loss         = "ce",     # cross-entropy
+  n_repetitions = 5
+)
+
+# Print results
+print(imp_knn)
+
+# Plot importance
+plot(imp_knn) + theme_classic()
+
+```
+
+### 5.3.6 Conclusion
+
+The KNN model shows a noticeably different performance profile compared to logistic regression. While logistic regression achieves both high sensitivity (0.95) and specificity (0.96) with an overall accuracy of 0.96, KNN attains perfect specificity (1.00) and PPV (1.00) but at the cost of much lower sensitivity (0.67), meaning it misses a substantial number of true recurrence cases. Both models demonstrate strong discrimination (AUC ≈ 0.96–0.97), but KNN’s higher Brier score (0.073 vs. 0.035) suggests poorer probability calibration. Overall, logistic regression provides a more balanced and reliable performance, whereas KNN is highly conservative—excellent at ruling out non-recurrence but less effective at detecting recurrence.
+
+## 5.4 Decision Tree
+
+### 5.4.1 Training model
+
+```{r}
+# Fit Decision Tree with caret
+set.seed(123)
+fit_dt <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "rpart",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneLength = 10   # try different complexity parameters
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_dt <- predict(fit_dt, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_dt <- predict(fit_dt, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_dt <- factor(pred_class_dt, levels = c("No","Yes"))
+
+```
+
+### 5.4.2 Confusion matrix
+
+```{r}
+cm_dt <- caret::confusionMatrix(
+  data      = pred_class_dt,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_dt)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table_dt <- as.data.frame(cm_dt$table)
+
+# Rename columns for clarity
+colnames(cm_table_dt) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table_dt, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - Decision Tree",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.4.3 ROC Curve & AUC
+
+```{r}
+roc_obj_dt <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_dt[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj_dt,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for Decision Tree"
+)
+
+# Print AUC
+auc_val_dt <- pROC::auc(roc_obj_dt)
+print(auc_val_dt)
+
+```
+
+### 5.4.4 Brier value
+
+```{r}
+brier_val_dt <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # convert factor ("No","Yes") → 0/1
+  pred_prob_dt[,"Yes"]                 # probability for "Yes"
+)
+print(brier_val_dt)
+
+```
+
+### 5.4.5 Variable Importance
+
+```{r}
+vi_dt <- varImp(fit_dt, scale = TRUE)
+print(vi_dt)
+
+plot(vi_dt, top = 20)
+
+```
+
+### 5.4.6 Conclusion
+
+The decision tree model delivers a balanced performance between logistic regression and KNN. Like logistic regression, it achieves high overall accuracy (0.96) and strong predictive balance, with sensitivity (0.90) and specificity (0.98) both remaining high. Compared to logistic regression (AUC = 0.97, Brier = 0.035), the decision tree shows slightly lower discrimination (AUC = 0.91) but slightly better calibration (Brier = 0.031). In contrast, KNN sacrifices sensitivity (0.67) in favor of perfect specificity (1.00) and PPV (1.00), making it overly conservative and prone to missing true recurrences. Thus, while logistic regression remains the most discriminative model and KNN the most cautious, the decision tree provides a strong compromise—offering high accuracy and interpretability with reliable performance across both positive and negative predictions.
+
+### 5.5 Random Forest
+
+### 5.5.1 Training model
+
+```{r}
+# Fit Random Forest with caret
+set.seed(123)
+fit_rf <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "rf",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneLength = 5    # tries multiple mtry values
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_rf <- predict(fit_rf, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_rf <- predict(fit_rf, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_rf <- factor(pred_class_rf, levels = c("No","Yes"))
+
+```
+
+### 5.5.2 Confusion matrix
+
+```{r}
+cm_rf <- caret::confusionMatrix(
+  data      = pred_class_rf,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_rf)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table_rf <- as.data.frame(cm_rf$table)
+
+# Rename columns for clarity
+colnames(cm_table_rf) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table_rf, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - Random Forest",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.5.3 ROC Curve & AUC
+
+```{r}
+roc_obj_rf <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_rf[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj_rf,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for Random Forest"
+)
+
+# Print AUC
+auc_val_rf <- pROC::auc(roc_obj_rf)
+print(auc_val_rf)
+
+```
+
+### 5.5.4 Brier value
+
+```{r}
+brier_val_rf <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # convert "No"=0, "Yes"=1
+  pred_prob_rf[,"Yes"]                 # probability for "Yes"
+)
+print(brier_val_rf)
+```
+
+### 5.5.5 Variable Importance
+
+```{r}
+vi_rf <- varImp(fit_rf, scale = TRUE)
+print(vi_rf)
+
+plot(vi_rf, top = 20)
+
+```
+
+### 5.5.6 Conclusion
+
+The random forest model achieves solid performance, with high specificity (0.98) and good PPV (0.94), but its sensitivity drops to 0.76, meaning it misses more true recurrences than logistic regression (0.95) or decision trees (0.90). While its overall accuracy (0.92) is lower than both logistic regression and decision trees (0.96), its AUC (0.97) is among the highest, showing excellent ability to discriminate between recurrent and non-recurrent cases. Compared to KNN, random forest provides a better balance between sensitivity and specificity, though with slightly less calibration (Brier = 0.060 vs. 0.073 for KNN). In summary, random forest offers strong discriminative power and reliability, but logistic regression and decision trees maintain a better balance between sensitivity and specificity, whereas KNN remains more conservative but less sensitive.
+
+## 5.6 Support Vector Machine (SVM)
+
+### 5.6.1 Training model
+
+```{r}
+# Fit SVM with radial basis kernel using caret
+set.seed(123)
+fit_svm <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "svmRadial",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneLength = 10   # tune over cost & sigma
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_svm <- predict(fit_svm, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_svm <- predict(fit_svm, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_svm <- factor(pred_class_svm, levels = c("No","Yes"))
+
+```
+
+### 5.6.2 Confusion matrix
+
+```{r}
+cm_svm <- caret::confusionMatrix(
+  data      = pred_class_svm,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_svm)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table_svm <- as.data.frame(cm_svm$table)
+
+# Rename columns for clarity
+colnames(cm_table_svm) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table_svm, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - SVM",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.6.3 ROC Curve & AUC
+
+```{r}
+roc_obj_svm <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_svm[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj_svm,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for SVM"
+)
+
+# Print AUC
+auc_val_svm <- pROC::auc(roc_obj_svm)
+print(auc_val_svm)
+
+```
+
+### 5.6.4 Brier value
+
+```{r}
+brier_val_svm <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # convert factor to 0/1
+  pred_prob_svm[,"Yes"]                # predicted probabilities for "Yes"
+)
+print(brier_val_svm)
+
+
+```
+
+### 5.6.5 Variable Importance
+
+Not interpretable
+
+### 5.6.6 Conclusion
+
+The SVM model performs on par with logistic regression, achieving the same high accuracy (0.96) and nearly identical balance between sensitivity (0.90) and specificity (0.98). Both models also demonstrate excellent discrimination (AUC ≈ 0.97) and strong calibration (Brier ≈ 0.037 for SVM vs. 0.035 for logistic regression), making them equally reliable for recurrence prediction. In contrast, the random forest shows strong discriminative ability (AUC = 0.97) but lower accuracy (0.92) and reduced sensitivity (0.76), indicating it tends to under-detect recurrences despite high specificity. Overall, logistic regression and SVM stand out as the most balanced and dependable models, while random forest offers strong discrimination but at the cost of missing more true positive cases.
+
+## 5.7 Artificial Neural Network (ANN)
+
+### 5.7.1 Training model
+
+```{r}
+# Fit ANN with caret (nnet)
+set.seed(123)
+fit_ann <- caret::train(
+  Recurred ~ ., 
+  data = train_all[, c(predictors, outcome)],
+  method = "nnet",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneLength = 5,         # search over different hidden units/decay
+  trace = FALSE           # suppress training output
+)
+
+# Predictions
+# Probabilities for positive class "Yes"
+pred_prob_ann <- predict(fit_ann, newdata = test_all, type = "prob")
+
+# Class predictions
+pred_class_ann <- predict(fit_ann, newdata = test_all)
+
+# Make sure both outcome and predictions are factors with the same levels
+test_all$Recurred <- factor(test_all$Recurred, levels = c("No","Yes"))
+pred_class_ann <- factor(pred_class_ann, levels = c("No","Yes"))
+
+```
+
+### 5.7.2 Confusion matrix
+
+```{r}
+cm_ann <- caret::confusionMatrix(
+  data      = pred_class_ann,
+  reference = test_all$Recurred,
+  positive  = "Yes"
+)
+print(cm_ann)
+
+# Convert confusion matrix table to a data frame for plotting
+cm_table_ann <- as.data.frame(cm_ann$table)
+
+# Rename columns for clarity
+colnames(cm_table_ann) <- c("Prediction", "Reference", "Freq")
+
+# Plot heatmap
+ggplot(cm_table_ann, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  labs(title = "Confusion Matrix - ANN",
+       x = "Actual",
+       y = "Predicted") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 5.7.3 ROC Curve & AUC
+
+```{r}
+roc_obj_ann <- pROC::roc(
+  response  = test_all$Recurred,
+  predictor = pred_prob_ann[,"Yes"],
+  levels    = c("No", "Yes"),   # first = controls, second = cases
+  direction = "<"
+)
+
+# Plot ROC curve
+plot(
+  roc_obj_ann,
+  col = "#4978C9",
+  lwd = 2,
+  main = "ROC Curve for ANN"
+)
+
+# Print AUC
+auc_val_ann <- pROC::auc(roc_obj_ann)
+print(auc_val_ann)
+
+```
+
+## 5.7.4 Brier value
+
+```{r}
+brier_val_ann <- ModelMetrics::brier(
+  as.numeric(test_all$Recurred) - 1,   # convert factor ("No","Yes") → 0/1
+  pred_prob_ann[,"Yes"]                # probability for positive class
+)
+print(brier_val_ann)
+```
+
+### 5.7.5 Variable Importance
+
+```{r}
+vi_ann <- varImp(fit_ann, scale = TRUE)
+print(vi_ann)
+
+plot(vi_ann, top = 20)
+
+```
+
+### 5.7.6 Conclusion
+
+The artificial neural network (ANN) achieves strong performance with accuracy of 0.93, sensitivity of 0.90, and specificity of 0.95, supported by an excellent AUC of 0.97. Compared to logistic regression and SVM, which both reach higher accuracy (0.96), slightly better calibration (Brier ≈ 0.035–0.037 vs. 0.043), and equally high AUC, the ANN is competitive but somewhat less precise in positive predictions (PPV = 0.86 vs. \~0.91–0.95). The decision tree matches SVM and logistic regression in accuracy (0.96) but lags in discrimination (AUC = 0.91), though its calibration is very strong (Brier ≈ 0.031). The random forest delivers excellent discrimination (AUC = 0.97) but sacrifices sensitivity (0.76) and accuracy (0.92), tending to under-detect recurrences despite high specificity. Finally, KNN stands out as the most unbalanced: it achieves perfect specificity (1.00) and PPV (1.00), but at the cost of poor sensitivity (0.67), missing many true recurrences, and a higher Brier score (0.073).
+
+# 6. Summary
+
+```{r}
+# Helper function to extract metrics
+extract_metrics <- function(cm, auc_val) {
+  out <- data.frame(
+    Accuracy    = cm$overall["Accuracy"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"],
+    PPV         = cm$byClass["Pos Pred Value"],
+    NPV         = cm$byClass["Neg Pred Value"],
+    AUC         = as.numeric(auc_val)
+  )
+  return(out)
+}
+
+# Collect metrics for all models
+results <- list(
+  "Logistic Regression" = extract_metrics(cm_glm, auc_val_glm),
+  "KNN"                 = extract_metrics(cm_knn, auc_val_knn),
+  "Decision Tree"       = extract_metrics(cm_dt,  auc_val_dt),
+  "Random Forest"       = extract_metrics(cm_rf,  auc_val_rf),
+  "SVM"                 = extract_metrics(cm_svm, auc_val_svm),
+  "ANN"                 = extract_metrics(cm_ann, auc_val_ann)
+)
+
+# Combine into one data frame
+results_df <- do.call(rbind, results)
+
+# Round for readability
+results_df <- round(results_df, 3)
+
+# Display
+knitr::kable(results_df, caption = "Model Performance Summary")
+
+```
+
+-   Across all six models, performance was generally strong, with accuracies above 90% and AUC values consistently high, indicating excellent discrimination between recurrent and non-recurrent cases.
+
+-   Logistic regression and SVM provide the most balanced performance, with high accuracy (\~0.96), strong sensitivity and specificity, excellent AUC (\~0.97), and reliable calibration, making them the most dependable overall.
+
+-   Decision trees achieve similar accuracy (0.96) and very high specificity (0.98), but their discrimination (AUC = 0.91) is weaker, though they remain interpretable and practical.
+
+-   Random forest delivers excellent discrimination (AUC = 0.97) but lower sensitivity (0.76) and overall accuracy (0.92), showing a tendency to under-detect recurrences despite high specificity.
+
+-   KNN and ANN sit at opposite ends: KNN is overly conservative with perfect specificity and PPV but very low sensitivity (0.67), while ANN achieves the highest AUC (0.97) but lower PPV (0.86), reflecting a higher false-positive rate.
+
+Thank you for reading!
