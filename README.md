@@ -1,5 +1,6 @@
 # R-Machine-Learning
 
+https://andrewnana.github.io/R-Machine-Learning-TCR/
 
 
 This project investigates recurrence in thyroid cancer patients using both statistical logistic regression and machine learning methods. With the logistic regression, we explore the relationship between ever smoking and the likelihood of recurrence. We then shift to machine learning techniques for risk stratification and evaluate the predictive accuracy of the following algorithms:
